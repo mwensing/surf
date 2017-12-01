@@ -2,7 +2,7 @@
 -- File       : Pgp2bGthUltra.vhd
 -- Company    : SLAC National Accelerator Laboratory
 -- Created    : 2013-06-29
--- Last update: 2017-11-15
+-- Last update: 2017-11-30
 -------------------------------------------------------------------------------
 -- Description: 
 -------------------------------------------------------------------------------
@@ -43,7 +43,7 @@ entity Pgp2bGthUltra is
       NUM_VC_EN_G       : integer range 1 to 4 := 4);
    port (
       -- GT Clocking
-      stableClk        : in  sl;                      -- GT needs a stable clock to "boot up"
+      stableClk        : in  sl;        -- GT needs a stable clock to "boot up"
       stableRst        : in  sl;
       gtRefClk         : in  sl;
       -- Gt Serial IO
@@ -53,12 +53,12 @@ entity Pgp2bGthUltra is
       pgpGtRxN         : in  sl;
       -- Tx Clocking
       pgpTxReset       : in  sl;
-      pgpTxOutClk      : out sl;                      -- recovered clock
+      pgpTxOutClk      : out sl;        -- recovered clock
       pgpTxClk         : in  sl;
       pgpTxMmcmLocked  : in  sl;
       -- Rx clocking
       pgpRxReset       : in  sl;
-      pgpRxOutClk      : out sl;                      -- recovered clock
+      pgpRxOutClk      : out sl;        -- recovered clock
       pgpRxClk         : in  sl;
       pgpRxMmcmLocked  : in  sl;
       -- Non VC Rx Signals
@@ -89,11 +89,12 @@ architecture mapping of Pgp2bGthUltra is
    signal gtHardReset : sl;
 
    -- PgpRx Signals
-   signal gtRxUserReset : sl;
-   signal phyRxLaneIn   : Pgp2bRxPhyLaneInType;
-   signal phyRxLaneOut  : Pgp2bRxPhyLaneOutType;
-   signal phyRxReady    : sl;
-   signal phyRxInit     : sl;
+   signal gtRxUserReset    : sl;
+   signal phyRxLaneIn      : Pgp2bRxPhyLaneInType;
+   signal phyRxLaneOut     : Pgp2bRxPhyLaneOutType;
+   signal phyRxReady       : sl;
+   signal phyRxInit        : sl;
+   signal phyRxInitOneShot : sl;
 
    -- PgpTx Signals
    signal gtTxUserReset : sl;
@@ -102,7 +103,7 @@ architecture mapping of Pgp2bGthUltra is
 
 begin
 
-   gtRxUserReset <= phyRxInit or pgpRxReset or pgpRxIn.resetRx;
+   gtRxUserReset <= phyRxInitOneShot or pgpRxReset or pgpRxIn.resetRx;
    gtTxUserReset <= pgpTxReset or pgpTxIn.resetTx;
 
    U_RstSync_1 : entity work.RstSync
@@ -115,6 +116,15 @@ begin
          syncRst  => resetGtSync);      -- [out]
 
    gtHardReset <= resetGtSync or stableRst;
+
+   U_rxRstOneShot : entity work.SynchronizerOneShot
+      generic map (
+         TPD_G         => TPD_G,
+         PULSE_WIDTH_G => 12500000)     -- 100 ms pulse
+      port map (
+         clk     => stableClk,
+         dataIn  => phyRxInit,
+         dataOut => phyRxInitOneShot);
 
    U_Pgp2bLane : entity work.Pgp2bLane
       generic map (
