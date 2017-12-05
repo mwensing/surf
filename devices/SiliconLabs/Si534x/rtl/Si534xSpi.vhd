@@ -101,7 +101,7 @@ spiMaster: entity work.SpiMaster
         spiSdo => spiMISO
     );
 
-comb: process (regAddress, regWriteValue, regRead, regWrite, spiRdEn, spiRdData, r)
+comb: process (regAddress, regWriteValue, regRead, regWrite, spiRdEn, spiRdData, rst, r)
     variable v : RegType;
 begin
     -- save registers

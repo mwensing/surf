@@ -157,7 +157,7 @@ spi: entity work.Si534xSpi
     );
 
 -- combinatorial process
-comb: process (axilRst, axilWriteMaster, axilReadMaster, r, regBusy, intr_sync, losXAXB_sync, lol_sync)
+comb: process (axilRst, axilWriteMaster, axilReadMaster, r, regBusy, regReadValue, intr_sync, losXAXB_sync, lol_sync)
     variable v : RegType;
     variable axilEp : AxiLiteEndpointType;
 begin
