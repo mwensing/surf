@@ -30,6 +30,9 @@ architecture tb of Si534xTb is
     constant TPD_C : time := 1.0 ns;
     constant AXI_CLK_PERIOD_C : real := 10.0e-9;
     constant AXI_ERROR_RESP_C  : slv(1 downto 0) := AXI_RESP_SLVERR_C;
+    constant AUTO_INIT_C : boolean := true;
+    constant INIT_FILE_C : string := "gbt120.mif";
+    constant INIT_ADDR_WIDTH_C : integer := 9;
 
     -- SPI interface
     signal spiSCK : sl;
@@ -83,7 +86,10 @@ dut: entity work.Si534x
     generic map (
         TPD_G => TPD_C,
         AXI_CLK_PERIOD_G => AXI_CLK_PERIOD_C,
-        AXI_ERROR_RESP_G => AXI_ERROR_RESP_C
+        AXI_ERROR_RESP_G => AXI_ERROR_RESP_C,
+        AUTO_INIT_G => AUTO_INIT_C,
+        INIT_FILE_G => INIT_FILE_C,
+        INIT_ADDR_WIDTH_G => INIT_ADDR_WIDTH_C
     )
     port map (
         axilClk => axilClk,

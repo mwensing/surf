@@ -27,6 +27,11 @@ entity Si534x is
     generic (
         TPD_G             : time                  := 1 ns;
 
+        -- automatic init
+        AUTO_INIT_G       : boolean               := false;
+        INIT_FILE_G       : string                := "dummy.mif";
+        INIT_ADDR_WIDTH_G : integer               := 9;
+
         -- AXI-lite clock frequency and error behaviour
         AXI_CLK_PERIOD_G  : real                  := 8.0E-9;
         AXI_ERROR_RESP_G  : slv(1 downto 0)       := AXI_RESP_SLVERR_C
@@ -58,7 +63,9 @@ entity Si534x is
 end Si534x;
 
 architecture rtl of Si534x is
-    type StateType is (IDLE_S, READ_WAIT_S, WRITE_WAIT_S);
+    constant COUNT10MS_MAX_C : integer := integer(10.0e-3 / AXI_CLK_PERIOD_G)-1;
+
+    type StateType is (INIT_S, IDLE_S, INIT_WAIT_S, READ_WAIT_S, WRITE_WAIT_S);
 
     type RegType is record
         axilWriteSlave : AxiLiteWriteSlaveType;
@@ -69,17 +76,23 @@ architecture rtl of Si534x is
         regRead : sl;
         regWrite : sl;
         manualRst : sl;
+        initAddr : slv(INIT_ADDR_WIDTH_G-1 downto 0);
+        initWait : integer range 0 to 255;
+        count10ms : integer range 0 to COUNT10MS_MAX_C;
     end record;
 
     constant REG_INIT_C : RegType := (
         axilWriteSlave => AXI_LITE_WRITE_SLAVE_INIT_C,
         axilReadSlave => AXI_LITE_READ_SLAVE_INIT_C,
-        state => IDLE_S,
+        state => INIT_S,
         regAddress => (others => '0'),
         regValue => (others => '0'),
         regRead => '0',
         regWrite => '0',
-        manualRst => '0'
+        manualRst => '0',
+        initAddr => (others => '0'),
+        initWait => 0,
+        count10ms => 0
     );
 
     signal regBusy : sl := '0';
@@ -90,6 +103,8 @@ architecture rtl of Si534x is
     signal losXAXB_sync : sl;
     signal lol_sync : sl;
 
+    -- data from ROM
+    signal initData : slv(31 downto 0) := x"FFFFFFFF";
 
     signal r : RegType := REG_INIT_C;
     signal rin : RegType;
@@ -132,6 +147,21 @@ lol_syncer: entity work.Synchronizer
         dataOut => lol_sync
     );
 
+-- TODO: integrate ROM
+InitRomGenerate: if AUTO_INIT_G = true generate
+    InitRom: entity work.Si534xInitRom
+        generic map (
+            TPD_G => TPD_G,
+            ADDR_WIDTH_G => INIT_ADDR_WIDTH_G,
+            INIT_FILE_G => INIT_FILE_G
+        )
+        port map (
+            clk => axilClk,
+            addr => r.initAddr,
+            data => initData
+        );
+end generate;
+
 -- output interrupt
 intOut <= intr_sync;
 
@@ -164,7 +194,7 @@ begin
     -- get current register value
     v := r;
 
-    -- AXI-lite registers
+    -- AXI-lite registers (only allowed in IDLE state)
     axiSlaveWaitTxn(axilEp, axilWriteMaster, axilReadMaster, v.axilWriteSlave, v.axilReadSlave);
     axiSlaveRegister(axilEp, x"000", 0, v.regRead);
     axiSlaveRegister(axilEp, x"000", 1, v.regWrite);
@@ -177,15 +207,55 @@ begin
     axiSlaveRegister(axilEp, x"00C", 0, v.regValue);
     axiSlaveDefault(axilEp, v.axilWriteSlave, v.axilReadSlave, AXI_ERROR_RESP_G);
 
+    -- don't allow AXI-lite writes if not in IDLE state
+    if v.state /= IDLE_S then
+        v.regRead := r.regRead;
+        v.regWrite := r.regWrite;
+        v.regValue := r.regValue;
+        v.regAddress := r.regAddress;
+    end if;
+
+    -- 10 ms counter
+    if v.count10ms = 0 then
+        v.count10ms := COUNT10MS_MAX_C;
+
+        if v.initWait > 0 then
+            v.initWait := v.initWait - 1;
+        end if;
+    else
+        v.count10ms := v.count10ms - 1;
+    end if;
+
     -- state machine
     case v.state is
+        when INIT_S =>
+            if initData /= x"FFFFFFFF" then
+                v.regRead := '0';       -- force read to 0 during init
+                v.regWrite := '1';      -- we will write to registers
+                v.regValue := initData(7 downto 0);
+                v.regAddress := initData(23 downto 8);
+                v.initWait := to_integer(unsigned(initData(31 downto 24)));
+                if regBusy = '1' then
+                    v.initAddr := std_logic_vector(unsigned(v.initAddr) + 1);
+                    v.state := INIT_WAIT_S;
+                end if;
+            else
+                v.state := IDLE_S;
+            end if;
+
         when IDLE_S =>
-            if r.regRead = '1' then
+            if (r.regRead = '1') and (regBusy = '1') then
                 v.state := READ_WAIT_S;
                 v.regRead := '0';
-            elsif r.regWrite = '1' then
+            elsif (r.regWrite = '1') and (regBusy = '1') then
                 v.state := WRITE_WAIT_S;
                 v.regWrite := '0';
+            end if;
+
+        when INIT_WAIT_S =>
+            v.regWrite := '0';
+            if regBusy = '0' and v.initWait = 0 then
+                v.state := INIT_S;
             end if;
 
         when READ_WAIT_S =>
@@ -199,6 +269,11 @@ begin
                 v.state := IDLE_S;
             end if;
     end case;
+
+    -- reset
+    if axilRst = '1' then
+        v := REG_INIT_C;
+    end if;
 
     -- update next register value signal
     rin <= v;
